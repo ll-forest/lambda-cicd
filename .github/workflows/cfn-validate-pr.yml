@@ -1,7 +1,12 @@
-name: Validate CloudFormation on PR
+name: CloudFormation Workflow
 
 on:
   pull_request:
+    paths:
+      - 'cloudformation/**'
+  push:
+    branches:
+      - main
     paths:
       - 'cloudformation/**'
 
@@ -10,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  validate-cfn:
+  validate-and-deploy-cfn:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -27,11 +32,13 @@ jobs:
           aws cloudformation validate-template --template-body file://cloudformation/s3-bucket.yml
 
       - name: Deploy test stack
+        if: github.event_name == 'pull_request'
         run: |
           stack_name="pr-test-stack-${{ github.event.pull_request.number }}"
           aws cloudformation create-stack --stack-name $stack_name --template-body file://cloudformation/s3-bucket.yml --parameters ParameterKey=Environment,ParameterValue=test
 
       - name: Comment on the PR
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -45,7 +52,7 @@ jobs:
 
   cleanup-on-merge:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'push' && github.event.ref == 'refs/heads/main'
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -54,7 +61,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-west-1
 
-      - name: Delete Test Stack
+      - name: Delete Test Stacks
         run: |
-          stack_name="pr-test-stack-${{ github.event.pull_request.number }}" 
-          aws cloudformation delete-stack --stack-name $stack_name
+          # Get list of all stacks with the prefix 'pr-test-stack-'
+          stacks=$(aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE | jq -r '.StackSummaries[] | select(.StackName | startswith("pr-test-stack-")) | .StackName')
+          
+          # Delete each stack
+          for stack in $stacks; do
+            echo "Deleting stack $stack"
+            aws cloudformation delete-stack --stack-name $stack
+          done
