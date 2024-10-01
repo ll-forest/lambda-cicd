@@ -35,7 +35,10 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           stack_name="pr-test-stack-${{ github.event.pull_request.number }}"
-          aws cloudformation create-stack --stack-name $stack_name --template-body file://cloudformation/s3-bucket.yml --parameters ParameterKey=Environment,ParameterValue=test
+          aws cloudformation create-stack --stack-name $stack_name \
+            --template-body file://cloudformation/s3-bucket.yml \
+            --parameters ParameterKey=Environment,ParameterValue=test \
+                         ParameterKey=PRNumber,ParameterValue=${{ github.event.pull_request.number }}
 
       - name: Comment on the PR
         if: github.event_name == 'pull_request'
@@ -63,10 +66,8 @@ jobs:
 
       - name: Delete Test Stacks
         run: |
-          # Get list of all stacks with the prefix 'pr-test-stack-'
           stacks=$(aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE | jq -r '.StackSummaries[] | select(.StackName | startswith("pr-test-stack-")) | .StackName')
           
-          # Delete each stack
           for stack in $stacks; do
             echo "Deleting stack $stack"
             aws cloudformation delete-stack --stack-name $stack
